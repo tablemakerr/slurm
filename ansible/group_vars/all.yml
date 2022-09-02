@@ -1,0 +1,11 @@
+dns_servers:
+  - 10.13.37.5
+gateway: 10.13.37.254
+loghost_ip: 10.13.37.11
+loghost_version: 3.35
+ntp_servers:
+  - '0.pool.ntp.org'
+  - '1.pool.ntp.org'
+  - '2.pool.ntp.org'
+  - '3.pool.ntp.org'
+subnet: 255.255.255.0

@@ -1,0 +1,310 @@
+#!/bin/bash
+
+###############################################################################
+# @author tyler
+# @version 1.0
+#
+# sschedctl
+#
+# Script that will modify all SLURM Partitions (Queues) based on output from
+# scontrol and the flag that gets called.
+# -r  Resume - Sets all Partitions 'Up'
+# -p  Pause - Sets all Partitions 'Down'
+#
+# Only users with `Administrator` privileges within sacctmgr can actually do
+# anything with this script, protecting it from general user usage.
+#
+# TODO Add option to take in list of Partitions rather than assume ALL
+# TODO Add way to skip all interactive commands and force pause - this could
+# allow the script to be called from other scripts...like say a requeue script
+# TODO A better message to print out during resuming
+###############################################################################
+
+### Variables ###
+
+# String of options we accept
+OPTSTRING="hprv?"
+
+# Did a required flag get set?
+required_flag=false
+
+# FUTURE USE
+# For when we want to pause/resume certain Parittions over ALL
+PARTITION_LIST=""
+
+# The final list that will be modified for scontrol
+PARTITIONS_TO_MODIFY=""
+
+# Where we expect scontrol to be
+SCONTROL_CMD="/apps/slurm/default/bin/scontrol"
+
+# Modifier to get actual Partition Names
+SCONTROL_GET_PARTITION_NAME="$SCONTROL_CMD show partition | grep Name | sed s/PartitionName=//"
+
+# What slurm interprets as Down
+SCHED_DOWN="Down"
+
+# What slurm interprets as Up
+SCHED_UP="Up"
+
+# Globally track an exit code
+EXIT_CODE=""
+
+# Who else the e-mail will be sent to
+CC_LIST=""
+
+# Primary recipient of the e-mail alert
+# Lets not have this go to Ops for now
+TO_LIST="tyler@mail.com"
+
+# Subject for the e-mail
+SUBJECT="Slurm Controller action: ${EVENT} on $(date '+%Y-%m-%d %H:%M:%S')"
+### END Variables ###
+
+### Functions ###
+
+# verbosity() outputText
+#
+# A unified way to toggle verbose output.
+# Text only gets outputted if the VERBOSE flag is set
+# to "true".
+# @param outputText - Text that will be printed.
+function verbosity
+{
+  if [ "$VERBOSE" = "true" ]; then
+    echo -e $1
+  fi
+}
+
+# usage()
+#
+# Shows the proper usage of this script
+function usage
+{
+  echo "Slurm State Control:"
+  echo "You must have proper SLURM privs in order to run this command"
+  echo "-h -> Displays this help message"
+  echo "-? -> Displays this help message"
+  echo "-r -> Resumes the SLURM Scheduler"
+  echo "-p -> Pauses the SLURM Scheduler"
+  echo "-v -> Triggers Verbose output"
+}
+
+# warning_message()
+#
+# Output a warning display to the person that ran this script to make sure
+# that they understand all work will HALT after pausing the scheduler
+# This is basically a 'whoopsies' check more than anything
+# Historically, I would pause the scheduler regardless because it was easier
+# within Moab to pause & resume built-in, but SLURM does not seem to have such
+# a system so confirmation is ideal
+function warning_message
+{
+  if [ $1 == $SCHED_UP ]
+  then
+    echo ""
+    echo "############ WARNING WARNING #############"
+    echo "#  THIS WILL RESUME THE SLURM SCHEDULER   #"
+    echo "#          ALL WORK WILL RESUME           #"
+    echo "#   ENSURE THAT YOU WERE DIRECTED BY AN   #"
+    echo "#  ADMINISTRATOR BEFORE YOU EXECUTE THIS  #"
+    echo "#        PRESS Enter TO CONTINUE          #"
+    echo "############ WARNING WARNING #############"
+    echo ""
+    read line
+
+    echo ""
+    echo "#######################################################"
+    echo "#                                                     #"
+    echo "#         READ ME BEFORE DOING ANYTHING ELSE          #"
+    echo "#                                                     #"
+    echo "#  Remember to resume the data transfers from GAEA    #"
+    echo "#                                                     #"
+    echo "#   If this is a result of an unscheduled outage,     #"
+    echo "# please contact an admin prior to resuming the scheduler #"
+    echo "#                                                     #"
+    echo "#             PRESS ENTER to CONTINUE                 #"
+    echo "#######################################################"
+    echo ""
+    read line
+
+    echo ""
+    echo "#######################################################"
+    echo "#                                                     #"
+    echo "#         READ ME BEFORE DOING ANYTHING ELSE          #"
+    echo "#                                                     #"
+    echo "#  Remember to resume the data transfers from GAEA    #"
+    echo "#                                                     #"
+    echo "#   If this is a result of an unscheduled outage,     #"
+    echo "# please contact an admin prior to resuming the scheduler #"
+    echo "#                                                     #"
+    echo "#             PRESS ENTER to CONTINUE                 #"
+    echo "#######################################################"
+    echo ""
+    read line
+
+    while true; do
+      read -p "Do you wish to RESUME the SLURM scheduler & RESTART ALL WORK? [Y/N]" yn
+      case $yn in
+        [Yy]*)
+          echo "Launching Resume function"
+          echo ""
+          EVENT="RESUME"
+          schedctl $SCHED_UP
+          break
+          ;;
+        [Nn]*)
+          echo "Cancelling pausing"
+          echo ""
+          echo "!!! NO CHANGES HAVE BEEN MADE TO THE SCHEDULER !!!"
+          exit
+          ;;
+        *)
+          echo "Please enter Y/N"
+          ;;
+      esac
+    done
+  else
+    echo ""
+    echo "############ WARNING WARNING #############"
+    echo "#  THIS WILL PAUSE THE SLURM SCHEDULER   #"
+    echo "#          ALL WORK WILL HALT            #"
+    echo "#   ENSURE THAT YOU WERE DIRECTED BY AN  #"
+    echo "#  ADMINISTRATOR BEFORE YOU EXECUTE THIS #"
+    echo "#        PRESS Enter TO CONTINUE         #"
+    echo "############ WARNING WARNING #############"
+    echo ""
+    read line
+
+    echo ""
+    echo "#######################################################"
+    echo "#                                                     #"
+    echo "#         READ ME BEFORE DOING ANYTHING ELSE          #"
+    echo "#                                                     #"
+    echo "#                                                     #"
+    echo "#   If this is a result of an unscheduled outage,     #"
+    echo "# please contact an admin prior to resuming the scheduler #"
+    echo "#                                                     #"
+    echo "#             PRESS ENTER to CONTINUE                 #"
+    echo "#######################################################"
+    echo ""
+    read line
+
+    while true; do
+      read -p "Do you wish to PAUSE the SLURM scheduler & STOP ALL WORK? [Y/N]" yn
+      case $yn in
+        [Yy]*)
+          echo "Launching Pause function"
+          echo ""
+          EVENT="PAUSE"
+          schedctl $SCHED_DOWN
+          break
+          ;;
+        [Nn]*)
+          echo "Cancelling pausing"
+          echo ""
+          echo "!!! NO CHANGES HAVE BEEN MADE TO THE SCHEDULER !!!"
+          exit
+          ;;
+        *)
+          echo "Please enter Y/N"
+          ;;
+      esac
+    done
+  fi
+}
+
+# schedctl scheduler_state
+# A central way to control the state of the scheduler.
+# Accepts input of internal variables of UP & DOWN to set the scheduler state
+# Setting all Partitions as DOWN will effectively PAUSE the scheduler
+# Setting all Partitions as Up will effectively RESUME the scheduler
+#
+# schedctl Up   RESUME
+# schedctl Down PAUSE
+function schedctl
+{
+  verbosity "Gathering Partitions"
+  PARTITIONS_TO_MODIFY=$(eval $SCONTROL_GET_PARTITION_NAME)
+
+  verbosity "Starting loop to set scheduler to $1"
+  for PARTITION in ${PARTITIONS_TO_MODIFY};
+  do
+    #echo $PARTITIONS_TO_MODIFY
+    echo "Working on $PARTITION"
+    echo ""
+    verbosity "Partition $PARTITION going $1"
+    # The actual resuming
+    #echo "$SCONTROL_CMD update PartitionName=$PARTITION State=$1"
+    $SCONTROL_CMD update PartitionName=$PARTITION State=$1
+    EXIT_CODE=$?
+    if [ "$EXIT_CODE" == 0 ]
+    then
+      verbosity "$PARTITION set to $1 sucessfully"
+      echo ""
+      #echo $PARTITIONS_TO_MODIFY
+    else
+      verbosity "FAILURE setting $PARTITION to $1 - Check slurmctld.log"
+      echo ""
+    fi
+  done
+  # Subject for the e-mail
+  SUBJECT="Slurm Controller action: ${EVENT} on $(date '+%Y-%m-%d %H:%M:%S')"
+  echo "Slurm Scheduler Event!!!!  Scheduler was marked as $1" |mail -s "$SUBJECT" $CC_LIST $TO_LIST
+}
+### END Functions ###
+
+while getopts "$OPTSTRING" OPTION; do
+  case $OPTION in
+    v)
+      # We want verbose output, and want to know this in the beginning"
+      VERBOSE="true"
+      ;;
+  esac
+done
+
+OPTIND=1
+
+while getopts "$OPTSTRING" OPTION; do
+  # Now that we know whether or not we want verbosity, we can then loop through the rest of the options.
+  case $OPTION in
+    h)
+      usage
+      exit 1
+      ;;
+    p)
+      required_flag=true
+      echo "Pausing SLURM scheduler"
+      warning_message
+      exit 0
+      ;;
+    r)
+      required_flag=true
+      echo "Resuming SLURM Scheduler"
+      warning_message $SCHED_UP
+      exit 0
+      ;;
+    \?)
+      usage
+      exit 1
+      ;;
+    :)
+      echo "Requires at least one argument"
+      usage
+      exit 1
+      ;;
+    *)
+      echo "Incorrect Option"
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+shift $(($OPTIND -1))
+
+if ! $required_flag
+then
+    echo "You must either specify to Pause (-p) or Resume (-r) the scheduler" >&2
+    exit 1
+fi

@@ -1,0 +1,157 @@
+#!/bin/bash
+###############################################################################
+# @author tyler
+# @version 1.0
+#
+# shold
+#
+# Script that will take in a user name and set their MaxJobs to 0
+# This effectively places the user in a hold as they cannot run jobs.
+# Will have a separate option to reset the user's MaxJobs to 50 (default)
+#
+# Only users with `Administrator` privileges within sacctmgr can actually do
+# anything with this script, protecting it from general user usage.
+#
+# TODO
+###############################################################################
+
+### Variables ###
+
+# Hold variable, default to true, unless -r specified
+HOLD="true"
+
+# Did a required flag get set?
+required_flag=false
+
+# Default value for MaxJobs
+MAX_JOB_DEFAULT="-1"
+
+# Set to zero
+MAX_JOB_ZERO="0"
+
+# String of options we accept
+OPTSTRING="hru:v?"
+
+# Where we expect scontrol to be
+SCONTROL_CMD="/apps/slurm/default/bin/scontrol"
+
+# Where we expect sacctmgr to be
+SACCTMGR_CMD="/apps/slurm/default/bin/sacctmgr "
+
+# Globally track an exit code
+EXIT_CODE=""
+
+## END VARIABLES
+
+### Functions ###
+
+# verbosity() outputText
+#
+# A unified way to toggle verbose output.
+# Text only gets outputted if the VERBOSE flag is set
+# to "true".
+# @param outputText - Text that will be printed.
+function verbosity
+{
+  if [ "$VERBOSE" = "true" ]; then
+    echo -e $1
+  fi
+}
+
+# usage()
+#
+# Shows the proper usage of this script
+function usage
+{
+  echo "Slurm Hold:"
+  echo "You must have proper SLURM privs in order to run this command"
+  echo "-h          -> Displays this help message"
+  echo "-r          -> Sets the script to 'resume' a user's work, effectively setting their Maxjobs to $MAX_JOB_DEFAULT"
+  echo "-u \$USER    -> User to hold.  This will effectively set their MaxJobs to $MAX_JOB_ZERO"
+  echo "-?          -> Displays this help message"
+  echo "-v          -> Triggers Verbose output"
+}
+
+function hold_user
+{
+  if [ -z $USER ]
+  then
+    echo '$USER is empty, CANNOT CONTINUE'
+    exit 4
+  fi
+
+  verbosity "Working on $USER"
+
+  if $HOLD
+  then
+    MAX_JOB=$MAX_JOB_ZERO
+    verbosity "Setting MaxJob to $MAX_JOB_ZERO"
+  else
+    MAX_JOB=$MAX_JOB_DEFAULT
+    verbosity "Setting MaxJob to $MAX_JOB_DEFAULT"
+  fi
+
+  verbosity "Setting $USER's MaxJobs to $MAX_JOB"
+  $SACCTMGR_CMD modify user $USER set MaxJobs=$MAX_JOB
+  EXIT_CODE=$?
+
+  if [ "$EXIT_CODE" == "0" ]
+  then
+    echo "$USER modified successfully.  Set MaxJob to $MAX_JOB"
+    exit 0
+  else
+    echo "SOMETHING WENT WRONG!!!"
+    exit $EXIT_CODE
+  fi
+}
+
+## END FUNCTIONS ##
+
+while getopts "$OPTSTRING" OPTION; do
+  case $OPTION in
+    v)
+      # We want verbose output, and want to know this in the beginning"
+      VERBOSE="true"
+      break
+      ;;
+  esac
+done
+
+#OPTIND=1
+
+while getopts "$OPTSTRING" OPTION; do
+  # Now that we know whether or not we want verbosity, we can then loop through the rest of the options.
+  case $OPTION in
+    h)
+      usage
+      exit 1
+      ;;
+    r)
+      HOLD=false
+      ;;
+    u)
+      required_flag=true
+      USER=$OPTARG
+  #    exit 0
+      ;;
+    \?)
+      usage
+      exit 1
+      ;;
+    *)
+      echo "Incorrect Option"
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+shift $(($OPTIND -1))
+
+if ! $required_flag
+then
+    echo "You must specify a user with -u" >&2
+    exit 1
+fi
+
+hold_user

@@ -1,0 +1,17 @@
+#!/bin/bash
+TO_LIST='tyler@mail.com'
+CC_LIST=''
+DATE=`date +%F`
+SUBJECT="Slurm stats for ${DATE}"
+TMP_FILE="/tmp/.slurm_stats_${DATE}"
+PYTHON3='/apps/python/3.2/bin/python3'
+SSTATS_SCRIPT='/apps/slurm/scripts/sstats.py -cd'
+SSTATS_LOG='/var/log/slurm/sstats_log'
+NODE_STATS_SCRIPT='/apps/slurm/scripts/node_stats.py -ad'
+
+#clear
+$PYTHON3 $SSTATS_SCRIPT >> $TMP_FILE 
+$PYTHON3 $NODE_STATS_SCRIPT >> $TMP_FILE
+cat $TMP_FILE | mail -s "$SUBJECT" $CC_LIST $TO_LIST
+
+mv $TMP_FILE $SSTATS_LOG

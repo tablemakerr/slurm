@@ -1,0 +1,21 @@
+---
+common_packages:
+  - freeipmi
+  - freeipmi-devel
+  - git
+  - gtk2-devel
+  - hwloc
+  - hwloc-devel
+  - json-c-devel
+  - libcurl-devel
+  - libidn-devel
+  - libssh2-devel
+  - logrotate
+  - lua-devel
+  - lz4-devel
+  - ncurses-devel
+  - numactl-devel
+  - pam-devel
+  - postfix-ldap
+  - postfix-pcre
+  - readline-devel

@@ -1,0 +1,322 @@
+#!/bin/bash +x
+
+###############################################################################
+# @author tyler
+# @version 1.0
+#
+# ssrequeue
+#
+# Script that will loop through all slurm jobs and requeue each of them
+# Should be launched after taking all Partitions down in order to prevent work
+# from starting back up
+# Still a WIP
+#
+# Only users with `Administrator` privileges within sacctmgr can actually do
+# anything with this script, protecting it from general user usage.
+#
+# TODO Force this script to specify batch cluster only
+# do not assume that it will just run on the local cluster
+###############################################################################
+
+### Variables ###
+
+# String of options we accept
+OPTSTRING="ahu:v?"
+
+# Did a required flag get set?
+required_flag=false
+
+# Where we expect scontrol to be
+SCONTROL_CMD="/apps/slurm/default/bin/scontrol"
+
+# Where we expect squeue to be
+SQUEUE_CMD="/apps/slurm/default/bin/squeue --state=running -o %A -h"
+
+# Wher we expect shold to be
+SHOLD_CMD="/apps/slurm/scripts/shold"
+
+# list of jobs
+SLURM_JOB_LIST=""
+
+# Command to requeue a job
+SCONTROL_REQUEUE="$SCONTROL_CMD requeue"
+
+# Globally track an exit code
+EXIT_CODE=""
+
+# Body of the email containing JOBS
+BODY_FILE="/tmp/.slurm_paused"
+
+# Who else the e-mail will be sent to
+CC_LIST="-c "
+
+# Primary recipient of the e-mail alert
+# Lets not have this go to Ops for now
+TO_LIST="tyler@mail.com"
+
+# Subject for the e-mail
+SUBJECT="Rescheduled SLURM Post-processing Jobs: $(date '+%Y-%m-%d %H:%M:%S')"
+
+## END VARIABLES
+
+### Functions ###
+
+# verbosity() outputText
+#
+# A unified way to toggle verbose output.
+# Text only gets outputted if the VERBOSE flag is set
+# to "true".
+# @param outputText - Text that will be printed.
+function verbosity
+{
+  if [ "$VERBOSE" = "true" ]; then
+    echo -e $1
+  fi
+}
+
+# usage()
+#
+# Shows the proper usage of this script
+function usage
+{
+  echo "Slurm Requeue:"
+  echo "You must have proper SLURM privs in order to run this command"
+  echo "-a          -> Requeue all running jobs in the system.  Should probably be used with sschedctl"
+  echo "-h          -> Displays this help message"
+  echo "-u \$USER    -> Requeue all running work for the specified user.  Will also promt to hold the user's jobs."
+  echo "-?          -> Displays this help message"
+  echo "-v          -> Triggers Verbose output"
+}
+
+# warning_message()
+#
+# Output a warning display to the person that ran this script to make sure
+# that they understand all work will be requeued after this is complete
+# This is basically a 'whoopsies' check more than anything
+#
+# This is relatively new for a notice due to being extra cautious with a new system
+# By design for now, we do not call `sschedctl -p` just yet.  I want these operations
+# separate for now as they are two volatile things at once.
+function warning_message
+{
+  echo ""
+  echo "################ WARNING WARNING #################"
+  echo "#   THIS WILL REQUEUE ALL CURRENTLY RUNNING JOBS #"
+  echo "#       ENSURE THAT YOU WERE DIRECTED BY AN      #"
+  echo "#      ADMINISTRATOR BEFORE YOU EXECUTE THIS     #"
+  echo "#     OR THAT YOU HAVE NOTICED AN ISSUE FIRST    #"
+  echo "#                                                #"
+  echo "#       THIS DOES NOT PAUSE THE SCHEDULER        #"
+  echo "#          PRESS Enter TO CONTINUE               #"
+  echo "################ WARNING WARNING #################"
+  echo ""
+  read line
+
+  while true; do
+    echo "THIS WILL NOT PAUSE THE SCHEDULER"
+    read -p "Do you wish to REQUEUE all running jobs? [Y/N]" yn
+    case $yn in
+      [Yy]*)
+        echo "Attempting to requeue work..."
+        echo ""
+        requeue
+        break
+        ;;
+      [Nn]*)
+        echo "Cancelling requeue"
+        echo ""
+        echo "!!! NO CHANGES HAVE BEEN MADE TO THE SCHEDULER !!!"
+        exit
+        ;;
+      *)
+        echo "Please enter Y/N"
+        ;;
+    esac
+  done
+}
+
+# requeue()
+#
+# Reads in all running SLURM jobs and sends a re-queue signal to them
+# Will only pass through the jobs ONCE to signal re-queue
+# to continuously re-queue, run this script again, or in a loop.
+# While we can re-queue a whole list of jobs, its probably better to re-queue
+# one at a time.
+function requeue
+{
+  if $ALL
+  then
+    verbosity "Gathering ALL Running jobs to requeue"
+    SLURM_JOB_LIST=( $($SQUEUE_CMD) )
+  else
+    verbosity "Gathering $1's jobs to requeue"
+    SLURM_JOB_LIST=( $($SQUEUE_CMD -u $1 ) )
+  fi
+
+
+  if [  ${#SLURM_JOB_LIST[@]} == 0 ]
+  then
+    echo "Job list empty, no jobs to requeue"
+    exit 0
+  fi
+
+  verbosity "Requeueing ALL jobs"
+  {
+    for job in ${SLURM_JOB_LIST[@]}
+    do
+      verbosity "Attempting to requeue job $job..."
+      $SCONTROL_REQUEUE $job
+      EXIT_CODE=$?
+      if [ "$EXIT_CODE" == 0 ]
+      then
+        echo "$job has been requeued successfully!"
+      else
+        echo "FAILURE $job could not be requeued!"
+      fi
+      verbosity "\n"
+    done
+  }  2>&1 | tee $BODY_FILE
+
+  echo "All jobs have been requeued!!!"
+  mail_list
+  exit 0
+}
+
+function mail_list
+{
+  if [[ ! -f $BODY_FILE ]]
+  then
+      echo "ERROR: Missing job list $BODY_FILE"
+  fi
+  echo
+  cat $BODY_FILE | mail -s "$SUBJECT" $CC_LIST $TO_LIST
+  if [[ $? -ne 0 ]]
+  then
+      echo "ERROR: Failed to send mail $BODY_FILE to $TO_LIST"
+      exit 1
+  fi
+
+  rm $BODY_FILE
+
+  echo "Job list has been mailed to $TO_LIST"
+  echo "WARNING!!!!  Please run \`squeue --state=RUNNING\` to verify there are no running jobs"
+}
+
+# requeue_user() $userToRequeue
+#
+# Function that will take in a parameter of a username.
+# We first prompt if we want to hold all of a user's jobs from running.
+# If yes, then we call the custom script `shold $userToRequeue` on the user that is
+# specified here.
+# If not, we continue.
+# We then call the generic requeue() function to actually run the requeue process
+# for this specific user only.  When specifying the -u flag, we set the global flag
+# of ALL to `false` to tell the generic requeue we are not gathering all jobs.
+function requeue_user
+{
+  REQUEUE_USER=$1
+  verbosity "Attempting to requeue all the jobs of user REQUEUE_USER..."
+
+  while true; do
+    read -p "Do you wish to also HOLD all of $REQUEUE_USER's jobs?[Y/N]" yn
+    case $yn in
+      [Yy]*)
+        echo "Holding all jobs for $REQUEUE_USER..."
+        echo ""
+        $SHOLD_CMD -u $REQUEUE_USER
+        EXIT_CODE=$?
+        if [ "$EXIT_CODE" == 0 ]
+        then
+          echo "$REQUEUE_USER has had all their future jobs held!"
+          echo ""
+        else
+          echo "FAILURE!  $REQUEUE_USER did not have their jobs held!"
+          echo ""
+        fi
+        break
+        ;;
+      [Nn]*)
+        echo "$REQUEUE_USER will not have their jobs held."
+        echo ""
+        break
+        ;;
+      *)
+        echo "Please enter Y/N"
+        ;;
+    esac
+  done
+
+  echo "Continuing..."
+
+  while true; do
+    read -p "Do you wish to REQUEUE all running jobs for $REQUEUE_USER? [Y/N]" yn
+    case $yn in
+      [Yy]*)
+        echo "Attempting to requeue running jobs for $REQUEUE_USER..."
+        echo ""
+        requeue $REQUEUE_USER
+        break
+        ;;
+      [Nn]*)
+        echo "Cancelling requeue for $REQUEUE_USER"
+        echo ""
+        exit 0
+        ;;
+      *)
+        echo "Please enter Y/N"
+        ;;
+    esac
+  done
+}
+
+## END FUNCTIONS ##
+
+while getopts "$OPTSTRING" OPTION; do
+  case $OPTION in
+    v)
+      # We want verbose output, and want to know this in the beginning"
+      VERBOSE="true"
+      ;;
+  esac
+done
+
+OPTIND=1
+
+while getopts "$OPTSTRING" OPTION; do
+  # Now that we know whether or not we want verbosity, we can then loop through the rest of the options.
+  case $OPTION in
+    a)
+      required_flag=true
+      ALL=true
+      warning_message
+      exit 0
+      ;;
+    h)
+      usage
+      exit 1
+      ;;
+    u)
+      required_flag=true
+      ALL=false
+      requeue_user $OPTARG
+      exit 0
+      ;;
+    \?)
+      usage
+      exit 1
+      ;;
+    *)
+      echo "Incorrect Option"
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+shift $(($OPTIND -1))
+
+if ! $required_flag
+then
+    echo "You must either specify a user to requeue (-u $USER) or the whole scheduler (-a)" >&2
+    exit 1
+fi

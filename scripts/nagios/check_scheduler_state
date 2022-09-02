@@ -1,0 +1,76 @@
+#!/bin/bash
+
+###############################################################################
+# @author tyler
+# @version 1.0
+#
+# check_scheduler_state
+#
+# Script that will run `scontrol show node $NODE` and check the node state.
+# If the state is not a good one, we will report in nagios as a WARNING of such.
+#
+#
+# 
+# Script should be runnable by nrpe
+# Final destination will be in /apps/nagios/libexec
+###############################################################################
+
+SCONTROL_CMD="/apps/slurm/default/bin/scontrol show node "
+
+NODE_HOSTNAME=`/bin/hostname`
+
+#STATE_PARSE=" | grep State | awk '{print ${1}}'  | sed s/.*=//g | sed s/[*]//g"
+
+EXIT_CODE=""
+
+function get_state
+{
+    NODE_STATE=`${SCONTROL_CMD} ${NODE_HOSTNAME} | grep State | awk '{print $1}'  | sed s/.*=//g | sed s/[*]//g`
+}
+
+function check
+{
+    get_state
+    case $NODE_STATE in 
+      "ALLOCATED")
+        echo "OK: Node is ${NODE_STATE}, as is normal..."
+        EXIT_CODE=0
+        ;;
+      "DOWN")
+        echo "WARNING: Node is listed as ${NODE_STATE} within Slurm..."
+        EXIT_CODE=1
+        ;;
+      "IDLE")
+        echo "OK: Node is ${NODE_STATE}..."
+        EXIT_CODE=0
+        ;;
+      "IDLE+DRAIN")
+        echo "WARNING: Node is ${NODE_STATE}..."
+        EXIT_CODE=1
+        ;;
+      "MAINT")
+        echo "WARNING: Node is ${NODE_STATE}..."
+        EXIT_CODE=1
+        ;;
+      "MIXED")
+        echo "OK: Node is ${NODE_STATE}..."
+        EXIT_CODE=0
+        ;;
+      "MIXED+COMPLETING")
+        echo "OK Node is ${NODE_STATE}..."
+        EXIT_CODE=0
+        ;;
+      "RESERVED")
+        echo "WARNING: Node is ${NODE_STATE}..."
+        EXIT_CODE=1
+        ;;
+      *)
+        echo "CRITICAL: State=${NODE_STATE}. Cannot retreive node state/State not accounted for"
+        EXIT_CODE=2
+        ;;
+    esac
+
+    exit ${EXIT_CODE}
+}
+
+check

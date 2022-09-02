@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# Test slurm job:
+# Working on different output for PATH to see what SLURM can actually see
+#SBATCH --job-name=test
+#SBATCH --output=bin/slurm_test_scripts/test_pathing_no_srun.result
+#SBATCH --ntasks=1
+#SBATCH --time=10:00
+
+ printf "Echoing PATH\n"
+ echo $PATH
+ printf "\n"
+
+ echo "Listing available modules without calling Module Bash\n"
+ module avail
+ printf "\n"
+
+ echo "Listing loaded modules without calling Module Bash\n"
+ module list
+ printf "\n"
+
+ echo "Listing available modules after explicitly calling the Module Bash\n"
+ /usr/local/Modules/default/init/bash; module avail
+ printf "\n"
+
+ echo "Listing loaded modules after explicitly calling the Module Bash\n"
+ /usr/local/Modules/default/init/bash; module list
+ printf "\n"
+
+
+# hostname
+# sleep 60
+#

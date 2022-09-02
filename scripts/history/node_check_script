@@ -1,0 +1,275 @@
+#!/usr/bin/perl -w
+#-------------------------------------------------------------------------------
+# node_check_script
+#-------------------------------------------------------------------------------
+# called by slurmctld
+#   If the node reaches an undesireable state, we will execute the
+#   drain_node function which will mark the node down in slurm &
+#   use the check to state the reason why
+#
+# /apps/slurm/default/etc/slurm.conf
+#   HealthCheckProgram = /apps/bin/node_check_script
+#   HealthCheckInterval = 60
+#   HealthCheckNodeState = ANY
+#
+# dependencies
+#   /usr/bin/stat
+#   /usr/lib64/nagios/plugins/check_disk
+#   /usr/lib64/nagios/plugins/check_swap
+#
+#   /opt/dell/srvadmin/sbin/omreport chassis memory
+#
+#   /apps/nagios/libexec/check_temps
+#     /opt/dell/srvadmin/bin/omreport chassis temps
+#-------------------------------------------------------------------------------
+use Sys::Hostname;
+use strict;
+
+sub get_dimms;
+sub check_memory;
+sub check_swap;
+sub check_disk;
+sub check_vftmp_public;
+sub check_temp;
+sub drain_node;
+sub add2line;
+
+# main
+my $thishost = hostname();
+
+my $msg;
+my $line = '';
+
+add2line(check_memory());
+add2line(check_swap());
+
+add2line(check_disk("/","40%","30%"));
+
+if ($thishost =~ /^an\d\d\d$/)
+{
+  $msg = check_disk("/vftmp","30%","20%");
+}
+else
+{
+  $msg = check_disk("/vftmp","40%","30%");
+}
+
+add2line($msg);
+
+if ($msg !~ /not mounted/)
+{
+  add2line(check_vftmp_public("/vftmp"));
+  add2line(check_vftmp_public("/vftmp/tmp"));
+  add2line(check_vftmp_public("/vftmp/vartmp"));
+}
+
+add2line(check_temp());
+
+if ($line)
+{
+  print "ERROR: $line\n";
+}
+
+exit(0);
+
+# For use with SLURM
+# Drains the node based on a failed health check
+# This method gets called by a failed health check, executes
+# scontrol update NodeName=$thishost State=DRAIN Reason=$reason
+# $reason expects the one & only parameter to be the message called by the check
+sub drain_node {
+  my $reason = @_;
+  my $scontrol = "/apps/slurm/default/bin/scontrol update NodeName=$thishost State=DRAIN Reason=$reason";
+
+  exec($scontrol);
+}
+
+sub check_vftmp_public {
+  my $dir = shift;
+  my $public_mode = "drwxrwxrwt";
+  my $message = '';
+
+  if (-e $dir)
+  {
+    my $mode=`/usr/bin/stat -L --printf=%A $dir`;
+    if ($mode ne $public_mode)
+    {
+      $message = "$dir mode not $public_mode";
+      drain_node($message);
+    }
+  }
+  else
+  {
+    $message = "no $dir";
+    drain_node($message);
+  }
+
+  return $message;
+}
+
+sub check_disk {
+  my ($fs,$free_warn,$free_crit) = @_;
+  my $message = '';
+
+  my $nagios = `/usr/lib64/nagios/plugins/check_disk -w $free_warn -c $free_crit -E -p $fs`;
+  chomp $nagios;
+
+  if ($nagios =~ /^DISK OK/)
+  {
+    return $message;
+  }
+  elsif ($nagios =~ /not found/) # from -E option: DISK CRITICAL: /vftmp not found
+  {
+    drain_node("$fs not mounted");
+  }
+  elsif ($nagios =~ /^DISK WARNING/)
+  {
+    drain_node("$fs space warning");
+  }
+  elsif ($nagios =~ /^DISK CRITICAL/)
+  {
+    drain_node("$fs space critical");
+  }
+  else
+  {
+    $message = "node_check_script bad $fs status";
+  }
+
+  return $message;
+}
+
+sub check_swap {
+  my $message = '';
+
+  my $nagios = `/usr/lib64/nagios/plugins/check_swap -w 50% -c 40%`;
+  chomp $nagios;
+
+  if ($nagios =~ /^SWAP OK/)
+  {
+    return $message;
+  }
+  elsif ($nagios =~ /WARNING/)
+  {
+    $message = "swap space warning";
+  }
+  elsif ($nagios =~ /CRITICAL/)
+  {
+    $message = "swap space critical";
+  }
+  else
+  {
+    $message = "node_check_script bad swap status";
+  }
+
+  drain_node($message);
+}
+
+sub check_memory
+{
+  my $message = '';
+
+  my $DIMMS_INSTALLED = 0;
+  my $DIMMS_OK = 0;
+  my $ERRORS = 0;
+  my $index;
+
+  my %DIMMS = get_dimms();
+
+  foreach $index (keys(%DIMMS))
+  {
+    next if ($DIMMS{$index}{type} eq "[Not Occupied]");
+
+    $DIMMS_INSTALLED++;
+
+    if ($DIMMS{$index}{status} !~ /ok/i)
+    {
+        #printf(STDERR "%d:%s:%s\n", $index,$DIMMS{$index}{name},$DIMMS{$index}{status});
+        $ERRORS++;
+    }
+  }
+
+  if ($ERRORS > 0)
+  {
+      $message = sprintf("%d DIMMs %d ok %d errors", $DIMMS_INSTALLED, ($DIMMS_INSTALLED - $ERRORS), $ERRORS);
+  }
+
+  drain_node($message);
+}
+
+sub get_dimms
+{
+  my %dimms;
+  my $index;
+
+  my @buff = `/opt/dell/srvadmin/sbin/omreport chassis memory`;
+
+  foreach (@buff)
+  {
+      chomp;
+
+      s/^\s+//g;
+      s/\s+$//g;
+
+      next if m/^$/;
+
+      if (m/^Index\s+:\s+([0-9]+)/)
+        {
+          $index = $1;
+          next;
+        }
+      elsif (m/^Status\s+:\s+(.*)/)
+        {
+          if ($1 eq "Unknown")
+            {
+              $index = undef;
+              next;
+            }
+
+          $dimms{$index}{status} = $1;
+          next;
+        }
+      elsif (m/^Connector Name\s+:\s+(.*)/ && defined($index))
+        {
+          $dimms{$index}{name} = $1;
+          next;
+        }
+      elsif (m/^Type\s+:\s+(.*)/ && defined($index))
+        {
+          $dimms{$index}{type} = $1;
+          next;
+        }
+  }
+
+  return(%dimms);
+}
+
+sub check_temp {
+  my $message = '';
+
+  my $temp = `/apps/nagios/libexec/check_temps`;
+  chomp $temp;
+
+  if ($temp !~ /^TEMPS OK/)
+  {
+    $temp =~ tr/,/ /;
+    $message = $temp;
+  }
+
+  drain_node($message);
+}
+
+sub add2line {
+  my $message = shift;
+
+  if ($message)
+  {
+    if ($line)
+    {
+      $line .= " | $message";
+    }
+    else
+    {
+      $line = $message;
+    }
+  }
+}

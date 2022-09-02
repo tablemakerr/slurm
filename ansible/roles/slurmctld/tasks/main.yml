@@ -1,0 +1,56 @@
+---
+- name: Create controller log files
+  file:
+    path: "{{ item }}"
+    owner: slurm
+    group: slurm
+    mode: 0640
+    state: touch
+    modification_time: preserve
+    access_time: preserve
+  loop:
+    - /var/log/slurm/slurmctld.log
+    - /var/log/slurm_jobcomp.log
+
+- name: Copy slurm controller configuration
+  template: 
+    src: slurmctld.service.j2
+    dest: /usr/lib/systemd/system/slurmctld.service
+    owner: root
+    group: root
+    mode: 0644
+  notify: reload systemd
+
+- name: Setup empty spool directory for single controller use
+  file:
+    path: /var/spool/slurmctld
+    state: directory
+    owner: slurm
+    group: slurm
+    mode: 0750
+
+- name: Create log sync cron jobs
+  cron:
+    hour: "{{ item.hour }}"
+    minute: 0
+    job: "{{ item.job }}"
+    name: "{{ item.name }}"
+    state: present
+    user: root
+  with_items:
+    - hour: 0
+      job: "rsync -avr --update /var/log/slurm/slurmctld.log*.gz /apps/slurm/logs/slurmctld/{{ ansible_hostname }}/"
+      name: Move slurmctld logs to /apps
+    - hour: 1
+      job: find /var/log/slurm -type f \( -name "*.gz" \) -mtime +30 -exec ls -l {} \;
+      name: Delete older slurmctld logs
+
+- name: Create daily stats cron
+  cron:
+    hour: 1
+    minute: 0
+    job: /apps/slurm/scripts/sstats_daily
+    name: Slurm GFDL Daily Statistics
+    state: present
+    user: root
+  when: ansible_hostname == "slurm01"

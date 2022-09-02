@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# Test slurm job:
+#SBATCH --job-name=TDB_test_slurm_chdir
+#SBATCH --chdir=/home/%u/bin/slurm_test_scripts/
+
+echo %u
+
+echo "The current directory is: "
+pwd
+#

@@ -1,0 +1,10 @@
+#!/usr/bin/env perl
+
+use Slurm;
+
+my $slurm = Slurm::new();
+
+$nodes = $slurm->load_node();
+unless($nodes) {
+	die "Failed to get node properly" . $slurm->strerror();
+}

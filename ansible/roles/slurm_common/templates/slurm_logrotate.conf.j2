@@ -1,0 +1,23 @@
+##
+# Slurm Logrotate Configuration
+##
+/var/log/slurm/*.log {
+        compress
+        dateext
+        missingok
+        nocopytruncate
+        nodelaycompress
+        nomail
+        notifempty
+        noolddir
+        rotate 60
+        sharedscripts
+        size=5M
+        create 640 slurm root
+        postrotate
+                for daemon in {{ slurm_daemon }}
+                do
+                        killall -SIGUSR2 $daemon
+                done
+        endscript
+}

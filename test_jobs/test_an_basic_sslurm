@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# Test slurm job:
+#SBATCH --job-name=test_analysis
+#SBATCH --ntasks=1
+#SBATCH --time=10:00
+#SBATCH --partition=analysis
+
+srun hostname
+srun sleep 60
+#
+

@@ -1,0 +1,8 @@
+#!/bin/csh
+if ( ! ($?LD_LIBRARY_PATH) ) then
+    setenv LD_LIBRARY_PATH "{{ slurm_path }}/default/lib"
+    else
+        setenv LD_LIBRARY_PATH "${LD_LIBRARY_PATH}:{{ slurm_path }}/default/lib"
+        endif
+        setenv PATH "${PATH}:{{ slurm_path }}/default/slurm/tools:{{ slurm_path }}/default/bin:{{ slurm_path }}/default/sbin"
+        setenv MANPATH "${MANPATH}:{{ slurm_path }}/default/share/man"

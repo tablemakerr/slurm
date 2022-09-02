@@ -1,0 +1,14 @@
+./archive
+./backup
+./ctld
+./d
+./dbd
+./default
+./d_el7
+./logs
+./redundant
+./spool
+./src
+./test
+./.vscode
+./apps

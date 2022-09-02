@@ -1,0 +1,65 @@
+---
+- name: Include NFS mount
+  include_role:
+    name: nfs_client
+
+- name: Include /apps mount
+  include_role:
+    name: app_client
+
+- name: Include Munge installation
+  include_role: 
+    name: munge
+
+- name: Install slurm dependencies
+  yum:
+    name: "{{ common_packages }}"
+    state: present
+
+- name: Add slurm group
+  group: 
+    name: slurm
+    gid: 1004
+    state: present
+
+- name: Add slurm user
+  user:
+    name: slurm
+    home: /apps/slurm
+    group: slurm
+    shell: /bin/bash
+    uid: 504 
+    state: present     
+
+- name: Remove slurm shell files
+  file:
+    path: "{{ item }}"
+    state: absent
+  with_items:
+    - /etc/profile.d/slurm.sh
+    - /etc/profile.d/slurm.csh
+
+- name: Install slurm templates
+  template: 
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: 0644
+  with_items:
+    - src: root_bashrc.j2
+      dest: /root/.bashrc
+    - src: slurm_logrotate.conf.j2
+      dest: /etc/logrotate.d/slurm
+
+- name: Create slurm /var directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: slurm
+    group: slurm
+    recurse: yes
+  loop:
+    - /var/log/slurm
+    - /var/run/slurm
+    - /var/spool/slurm    

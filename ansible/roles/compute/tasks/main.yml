@@ -1,0 +1,23 @@
+---
+- name: Ensure slurm log file exists
+  file:
+    path: /var/log/slurm/slurmd.log
+    owner: slurm
+    group: slurm
+    mode: 0640
+    state: present
+
+- name: Copy slurm client configuration
+  copy:
+    src: slurmd.service.j2
+    dest: /usr/lib/systemd/system/slurmd.service
+    owner: root
+    group: root
+    mode: 0644
+    state: present
+
+- name: Ensure slurmd service is running
+  service:
+    name: slurmd
+    state: started
+    enabled: yes

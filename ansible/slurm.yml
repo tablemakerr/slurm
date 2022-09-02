@@ -1,0 +1,17 @@
+---
+- hosts:
+    - ctld
+    - dbd
+  handlers:
+    - import_tasks: global_handlers.yml
+  pre_tasks:
+    - name: Clear Yum cache
+      command: yum clean all
+    - name: Main variables
+      include_vars: vars/main.yml
+  remote_user: root
+  roles:
+    - common
+    - slurm_common
+    - { role: slurmctld, when: ansible_hostname | regex_search("^slurm0.*") }
+    - { role: slurmdbd, when: ansible_hostname | regex_search("^slurmdbd0.*") }

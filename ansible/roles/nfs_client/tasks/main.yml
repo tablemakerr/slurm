@@ -1,0 +1,12 @@
+---
+- name: Ensure NFS directory exists
+  file:
+    path: "{{ nfs_directory }}"
+  
+- name: Mount NFS directories
+  mount:
+    path: "{{ nfs_directory }}"
+    src: "{{ nfs_src }}"
+    fstype: nfs
+    opts: "{{ nfs_options }}"
+    state: present

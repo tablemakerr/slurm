@@ -1,0 +1,21 @@
+---
+# Custom facts
+- name: Ensure custom fact directory exists
+  file: 
+    path: /etc/ansible/facts.d
+    recurse: yes
+    state: directory
+
+# - name: Install custom facts
+#   copy:
+#     src: "{{ item.src }}"
+#     dest: "{{ item.dest }}"
+#     mode: 0755
+#   with_items:
+    
+# - name: Reload ansible_local to pick up custom facts
+#   setup: filter=ansible_local
+
+- name: Import chrony client
+  include_role:
+    name: chrony

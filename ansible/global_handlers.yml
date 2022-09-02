@@ -1,0 +1,9 @@
+---
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: reload sssd
+  service:
+    name: sssd
+    state: restarted

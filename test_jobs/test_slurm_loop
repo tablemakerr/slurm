@@ -1,0 +1,14 @@
+#!/bin/bash
+
+# Test slurm job that will run in an endless loop to crash the system
+#SBATCH --ntasks=1
+#SBATCH --time=30
+#SBATCH --output=bin/slurm_test_scripts/slurm_loop/%j.out
+
+printf "I'm a dummy job meant to try to break the system"
+printf "\n"
+echo $SLURM_JOB_ID
+printf "\n"
+hostname
+printf "\n"
+sleep 60

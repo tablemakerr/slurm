@@ -1,0 +1,269 @@
+#!/bin/bash
+
+## Variables
+
+# String of options we accept
+OPTSTRING="78htvV:?"
+
+# Some colors for output
+RED='\033[0;31m'
+NO_COLOR='\033[0m'
+GREEN='\033[0;32m'
+PURPLE='\033[0;35m'
+
+# Base directory for Slurm
+APP="/apps/slurm"
+
+ARCHIVE="${APP}/archive"
+
+### Functions ###
+
+# verbosity() outputText
+#
+# A unified way to toggle verbose output.
+# Text only gets outputted if the VERBOSE flag is set
+# to "true".
+# @param outputText - Text that will be printed.
+function verbosity
+{ 
+  if [ "$VERBOSE" = "true" ]; then
+    echo -e $1
+  fi
+}
+
+# usage()
+#
+# Shows the proper usage of this script
+function usage
+{
+  echo "Slurm Compile"
+  echo "You must run this as the slurm user on a DBD host"
+  echo "-6           -> NO LONGER IMPLEMENTED Specifies to compile an EL6 version of Slurm with proper paths"
+  echo "-7           -> Specifies to compile an EL7 version of Slurm with proper paths"
+  echo "-8           -> NO LONGER IMPLEMENTED/DEFAULT SETTING Specifies to compile an EL8 version of Slurm with proper paths"
+  echo "-t           -> Specifies if we are compiling for test instead of production if specified"
+  echo "-h           -> Displays this help message"
+  echo "-V \$VERSION -> Specifies the version to download & compile"
+  echo "-?           -> Displays this help message"
+  echo "-v           -> Triggers Verbose output"
+}
+
+# sanity()
+# 
+# Checks a few items that should be true before we even continue
+# Currently checks to make sure we are the slurm user and that we are running on a DBD host
+function sanity
+{
+  # Must be the slurm user
+  verbosity "Checking if slurm user"
+  if [ "$(whoami)" != "slurm" ]; then
+      echo -e "${RED}You must be the Slurm user to run this${NO_COLOR}"
+      echo -e "${RED}You are currently: $(whoami)${NO_COLOR}"
+      exit 2
+  else
+      verbosity "${GREEN}You are indeed the Slurm user${NO_COLOR}"
+  fi
+
+  # Must be on a DBD host to properly compile DB libraries
+  verbosity "Checking host"
+  if [[ $HOSTNAME == *"slurmdbd"* ]]; then
+      verbosity "${GREEN}You are indeed on a Database host${NO_COLOR}"
+      download_slurm
+  elif [[ $HOSTNAME == *"ppam"* ]]; then
+      verbosity "${GREEN}You are indeed on a PPAM host${NO_COLOR}"
+      download_slurm
+  else
+      echo -e "${RED}You must run this on a SlurmDBD host or a PPAM host in order to compile properly${NO_COLOR}"
+      exit 3
+  fi
+}
+
+# download_slurm
+#
+# Function to download the Slurm tarball from the schedMD website & verify
+function download_slurm
+{
+  verbosity "Starting Slurm download of $VERSION" 
+  ## Establish more variables now that we have command line options
+
+  # URL to download 
+  SCHEDMD_URL="https://download.schedmd.com/slurm/slurm-${VERSION}.tar.bz2"
+
+  # Tarball final directory
+  TARBALL="${ARCHIVE}/slurm-${VERSION}.tar.bz2"
+
+  # Establish if we're doing a test branch or not
+  if [ $TEST ]; then
+      WORKING_DIR="/apps/slurm/test"
+  else
+      echo -e "We will be installing a ${RED}PRODUCTION${NO_COLOR} version"
+      WORKING_DIR="/apps/slurm"
+  fi
+
+  verbosity "Working dir is $WORKING_DIR"
+
+  # Download specified tarball.
+  if [[ $HOSTNAME == *"ppam"* ]]; then
+      verbosity "${RED}On PPAM host - skipping wget...did you download this already?${NO_COLOR}"
+  else
+      verbosity "Not on PPAM, performing wget" 
+      wget -q -P $ARCHIVE -O $TARBALL $SCHEDMD_URL
+  fi
+  
+  # If download succeeded, extract the tarball & start compilation, otherwise exit
+  # Taken from example here https://unix.stackexchange.com/a/548755
+  # Uses find to locate the file & see if it is bigger than a set size
+  # If it is, it will return the pathname & the IF statement will pass
+  # Else it prints nothing and the IF statement will fail
+  if [ -n "$(find $TARBALL -prune -size +6000000c)" ]; then
+      verbosity "Extracting the downloaded tarball"
+      tar --bzip2 -xf $TARBALL -C ${APP}/src/
+  
+      verbosity "Starting compilation"
+      compile_slurm
+  else
+      echo -e "${RED}Download does not exist${NO_COLOR}"
+      exit 5
+  fi
+}
+
+# compile_slurm
+#
+# After the download is verified
+function compile_slurm
+{
+  # Compilation directory
+  COMPILE="${APP}/src/slurm-$VERSION"
+
+  if [ $EL7 ]; then
+    VERSION="${VERSION}_el7"
+  fi
+
+  # Create new version directory
+  if [ ! -d $WORKING_DIR/$VERSION ]; then
+    verbosity "Creating new directory for new Slurm version"
+    mkdir $WORKING_DIR/$VERSION
+  fi
+
+  # Compile new version
+  verbosity "Moving to new compilation directory"
+  cd $COMPILE
+
+  verbosity "Cleaning install directory"
+  make clean
+
+  echo -e "Current directory is now ${PURPLE} ${PWD} ${NO_COLOR}"
+  verbosity "Running configuraiton script"
+  $COMPILE/configure --prefix=$WORKING_DIR/$VERSION > slurm_install_config.log 2>&1
+
+  if [ $? ]; then
+    echo -e "Configuration ${GREEN}SUCCESS${NO_COLOR}"
+    verbosity "Running 'make -j'" 
+    make -j > slurm_install_compilation.log 2>&1
+  else
+    echo -e "Configuration ${RED}FAIL${NO_COLOR}.  Check the configure log within the Slurm SRC"
+    exit 6
+  fi
+
+  if [ $? ]; then
+    echo -e "Compilation ${GREEN}SUCCESS${NO_COLOR}"
+    verbosity "Running 'make install'"
+    make install > slurm_install_installation.log 2>&1
+  else
+    echo -e "Compilation ${RED}FAIL${NO_COLOR}.  Check the output from the last make command"
+    exit 7
+  fi
+
+  if [ $? ]; then
+    echo -e "Installation ${GREEN}SUCCESS${NO_COLOR}"
+    cleanup_permissions
+  else
+    echo -e "Installation ${RED}FAIL${NO_COLOR}.  Check the output from the last make command"
+    exit 8
+  fi
+}
+
+# cleanup_permissions()
+#
+# Cleans up some items that I typically forget after a new slurm compilation
+function cleanup_permissions
+{
+  echo -e "${PURPLE}Performing cleanup functions${NO_COLOR}"
+
+  # Set new installed directory
+  SLURM_DIR="${WORKING_DIR}/${VERSION}"
+
+  verbosity "Copying latest /etc dir"
+  cp -rp --preserve=links $WORKING_DIR/default/etc $SLURM_DIR
+
+  verbosity "Correcting directory permissions"
+  find $WORKING_DIR/$VERSION/ -type d -exec chmod 0755 {} \;
+
+  verbosity "Correcting ownership permissions"
+  chown -R slurm: $SLURM_DIR
+
+  exit 0
+}
+
+## END FUNCTIONS ##
+
+while getopts "$OPTSTRING" OPTION; do
+  case $OPTION in
+    v)
+      # We want verbose output, and want to know this in the beginning"
+      VERBOSE="true"
+      ;;
+  esac
+done
+
+OPTIND=1
+
+while getopts "$OPTSTRING" OPTION; do
+  # Now that we know whether or not we want verbosity, we can then loop through the rest of the options.
+  case $OPTION in
+    6)
+      echo -e "${RED}THIS OPTION IS NO LONGER IMPLEMENTED${NO_COLOR}"
+      exit 7
+      ;;
+    7)
+      EL7=1
+      echo -e "We will be installing an ${GREEN}EL7${NO_COLOR} version"
+      ;;
+    8)
+      EL8=1
+      echo -e "We will be installing an ${GREEN}EL8${NO_COLOR} version"
+      ;;
+    h)
+      usage
+      exit 1
+      ;;
+    t)
+      required_flag=true
+      TEST=1
+      echo -e "We will be installing a ${GREEN}TEST${NO_COLOR} version"
+      ;;
+    \?)
+      usage
+      exit 1
+      ;;
+    V)
+      required_flag=true
+      VERSION=$OPTARG
+      echo -e "The Slurm version we will be installing is${PURPLE} $VERSION ${NO_COLOR}"
+      sanity
+      ;;
+    *)
+      echo -e "${RED}Incorrect Option${NO_COLOR}"
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+shift $(($OPTIND -1))
+
+if ! $required_flag
+then
+    echo -e ${RED}"You must either specify a version to download (-V VERSION) and whether or not this is test (-t)${NO_COLOR}" >&2
+    exit 1
+fi

@@ -1,0 +1,12 @@
+---
+- name: Ensure apps directory exists
+  file:
+    path: /apps
+
+- name: Mount /apps
+  mount:
+    path: /apps
+    src: "{{ apps_src }}"
+    fstype: nfs
+    opts: "{{ apps_options }}"
+    state: present

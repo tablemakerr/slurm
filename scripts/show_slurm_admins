@@ -1,0 +1,3 @@
+#!/bin/bash
+
+/apps/slurm/default/bin/sacctmgr show user where AdminLevel=Admin format=User%20

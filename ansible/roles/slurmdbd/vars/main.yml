@@ -1,0 +1,13 @@
+---
+database_packages:
+  - gcc
+  - git
+  - mariadb
+  - mariadb-common
+  - mariadb-devel
+  - mariadb-server
+  - pcp-pmda-mysql
+  - perl-DBD-MySQL
+  - php-mysqlnd
+  - python3-mysql
+  - python3-PyMySQL

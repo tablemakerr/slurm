@@ -1,0 +1,29 @@
+#!/bin/bash +x
+
+###############################################################################
+# @author tyler
+# @version 1.0
+#
+# stransfer_mon
+#
+# Small script that will look at the rdtn partition on GAEA and send a mail if 
+# the queue reaches dangerous levels.  Not meant to be anything more than that.
+# 
+# Installed on GAEA homedir to run @hourly within cron
+###############################################################################
+
+TRANSFER_AMOUNT=`/usr/bin/squeue -h --partition=rdtn | wc -l`
+
+# Test Value
+#TRANSFER_AMOUNT=1
+
+if [ $TRANSFER_AMOUNT -gt 1000 ]; then
+        WARN=1
+fi
+
+if [ $WARN ]; then
+        MESSAGE="Transfers @ ${TRANSFER_AMOUNT}"
+        SUBJECT="Slurm Transfer Overload"
+        TO_LIST="tylerv@mail.com"
+        echo ${MESSAGE} |/usr/bin/mail -s "${SUBJECT}" "${TO_LIST}"
+fi

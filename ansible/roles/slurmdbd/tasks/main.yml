@@ -1,0 +1,189 @@
+---
+- name: Install database dependencies
+  yum:
+    name: "{{ database_packages }}"
+    state: present
+
+- name: Create mysql log
+  file:
+    path: /var/log/mysqld.log
+    owner: mysql
+    group: root
+    mode: 0644
+    state: touch
+    modification_time: preserve
+    access_time: preserve
+
+- name: Copy slurm database configuration
+  template:
+    src: slurmdbd.service.j2
+    dest: /usr/lib/systemd/system/slurmdbd.service
+    owner: root
+    group: root
+    mode: 0644
+  notify: reload systemd
+
+- name: Create /slurm for SlurmDB pass storage
+  file:
+    path: /slurm
+    owner: slurm
+    group: slurm
+    state: directory
+    mode: 0700
+
+- name: Create SlurmDB pass file in /slurm
+  template: 
+    src: slurmdbpass.j2
+    dest: /slurm/.slurmdbpass
+    owner: slurm
+    group: slurm
+    mode: 0400
+
+- name: Create slurm database log file
+  file:
+    path: /var/log/slurm/slurmdbd.log
+    owner: slurm
+    group: slurm
+    mode: 0640
+  
+- name: Creat slurm database spool directory
+  file:
+    path: /var/spool/slurmdbd
+    state: directory
+    owner: slurm
+    group: slurm
+    mode: 0750
+
+# This must happen before making the backup dir or mariadb will complain it can't be initialized
+- name: Ensure mysql is running
+  service:
+    name: mariadb
+    state: started
+    enabled: yes
+  when: not ansible_check_mode
+
+- name: Ensure SQL backup directory exists
+  file:
+    path: /var/lib/mysql/backup
+    state: directory
+    owner: slurm
+    group: root
+    mode: 0700
+
+- name: Copy mysql & slurm files
+  copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  with_items:
+    - src: my.cnf
+      dest: /etc/my.cnf
+      owner: root
+      group: root
+      mode: '0600'
+    - src: slurm_backup
+      dest: /usr/sbin/slurm_backup
+      owner: root
+      group: root
+      mode: '0700'     
+
+- name: Create log sync cron jobs
+  cron:
+    hour: "{{ item.hour }}"
+    minute: 0
+    job: "{{ item.job }}"
+    name: "{{ item.name }}"
+    state: present
+    user: root
+  with_items:
+    - hour: 0
+      job: "rsync -avr --update /var/log/slurm/slurmDBD.log*.gz /apps/slurm/logs/slurmdbd/{{ ansible_hostname }}/"
+      name: Move slurmdbd logs to /apps
+    - hour: 1
+      job: find /var/log/slurm -type f \( -name "*.gz" \) -mtime +30 -exec ls -l {} \;
+      name: Delete older slurmdbd logs
+
+- name: Create slurmdbd backup crons
+  cron:
+    day: 6
+    hour: "{{ item.hour }}"
+    minute: 0
+    job: "{{ item.job }}"
+    name: "{{ item.name }}"
+    user: root
+    state: present
+  with_items:
+    - hour: 0
+      job: /usr/sbin/slurm_backup
+      name: Backup Slurm MariaDB
+    - hour: 1
+      job: /bin/find /var/lib/mysql/backup -type f -mtime +30 -exec /bin/rm -f {} \;
+      name: Delete old Slurm Backups
+
+# Items for `mysql_secure_installation`
+- name: Set mysql root password
+  mysql_user:
+    name: root
+    host_all: yes
+    password: "{{ mysql_root_password }}"
+  when: not ansible_check_mode
+  
+- name: Add credentials to .my.cnf
+  template:
+    src: root_cnf.j2
+    dest: /root/.my.cnf
+    owner: root
+    mode: '0600'
+
+- name: Delete anonymous mysql users
+  mysql_user:
+    name: ""
+    host_all: yes
+    state: absent
+  when: not ansible_check_mode
+
+- name: Delete Hostname based mysql user
+  mysql_user:
+    name: root
+    host: "{{ ansible_nodename }}"
+    state: absent
+  when: not ansible_check_mode
+
+- name: Delete mysql test database
+  mysql_db:
+    name: test
+    state: absent
+  when: not ansible_check_mode
+
+# Slurm specific setup
+- name: Create slurm_acct_db - the main slurm database
+  mysql_db:
+    name: slurm_acct_db
+    state: present
+  when: not ansible_check_mode
+
+- name: Create slurm database user for slurm_acct_db @ localhost
+  mysql_user:
+    name: slurm
+    host: localhost
+    password: "{{ mysql_slurm_password }}"
+    priv: '*.*:ALL'
+    state: present
+  when: not ansible_check_mode
+
+- name: Create slurm database user for slurm_acct_db @ fqdn
+  mysql_user:
+    name: slurm
+    host: "{{ ansible_nodename }}"
+    password: "{{ mysql_slurm_password }}"
+    priv: '*.*:ALL'
+    state: present
+  when: not ansible_check_mode
+
+- name: Ensure slurm DB user has permissions to all hosts
+  mysql_user:
+    name: slurm
+    host_all: yes
+# Database recovery still must take place

@@ -1,0 +1,52 @@
+#!/bin/bash
+
+###############################################################################
+# @author tyler
+# @version 1.0
+#
+# check_slurmd
+#
+# Script that will run on each slurmd host and make sure that not only is the
+# slurmd daemon running, but make sure the port that is expected to be LISTENING
+# is indeed listening.
+#
+# This script can take an infinite number of parameters that are port numbers
+# assuming the weird case ever comes up that it runs on different ports.
+#
+# Script should be runnable by nrpe
+# Final destination will be in /apps/nagios/libexec
+###############################################################################
+
+# Setup nagios failure states
+OK=0
+WARNING=1
+CRITICAL=2
+
+# Setup other parameters used later on.
+PORT_LIST=""
+SLURMD_PROC_COUNT=`/bin/ps aux | /bin/grep slurmd | wc -l`
+
+# Check the parameters given to the script
+# If we have multiple ports to check, we will do so
+if [ $# -lt 1 ]; then
+  PORT_LIST="6818"
+else
+  PORT_LIST="$*"
+fi
+
+# Check that the SLURMD is running
+if [ $SLURMD_PROC_COUNT -lt 2 ]; then
+  echo "SLURMD CRITICAL: Daemon is NOT running!"
+  exit $CRITICAL
+else
+  # Check the list of ports that we have
+  for PORT in $PORT_LIST; do
+    if [ `netstat -ln | grep -E "tcp.*:$PORT" | wc -l` -lt 1 ]; then
+      echo "SLURMD CRITICAL: Host is NOT listening on TCP port $PORT!"
+      exit $CRITICAL
+    fi
+  done
+  # All is good if we're here.
+  echo "SLURMD OK: Daemon is running.  Host is listening."
+  exit $OK
+fi

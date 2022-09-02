@@ -1,0 +1,29 @@
+# .bashrc
+
+# User specific aliases and functions
+
+alias rm='rm -i'
+alias cp='cp -i'
+alias mv='mv -i'
+alias jgrep='egrep -v "#|^$"'
+
+
+#umask 0177
+
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+        . /etc/bashrc
+fi
+
+export PATH=/bin/:$PATH
+
+# enable color support of ls and also add handy aliases
+if [ "$TERM" != "dumb" ]; then
+    eval "`dircolors -b`"
+    alias ls='ls --color=auto'
+fi
+
+# Slurm paths
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:{{ slurm_path }}/default/lib
+export PATH=$PATH:{{ slurm_path }}/default/bin:{{ slurm_path }}/default/sbin
+export MANPATH=$MANPATH:{{ slurm_path }}/default/share/man

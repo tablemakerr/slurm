@@ -1,0 +1,11 @@
+#!/bin/bash
+
+#SBATCH --job-name=percent_N_in_middle
+#SBATCH --ntasks=1
+#SBATCH --time=10:00
+#SBATCH --output /home/$USER/percent_N_out.%N.%x.%j
+
+hostname
+sleep 60
+exit 0
+#
